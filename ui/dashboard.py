@@ -11,12 +11,13 @@ from core.scanner import MarketScanner # <--- 新增导入
 from core.optimizer import StrategyOptimizer # <--- 新增
 from core.strategies.rsi import RsiStrategy   # <--- 新增
 from core.strategies.macd import MacdStrategy # <--- 新增
+from data.news_provider import NewsProvider # <--- 新增
 
 def render_dashboard():
     st.title("🎄 Stock Intelligence System")
 
-    # 创建三个标签页
-    tab1, tab2, tab3 = st.tabs(["📈 策略回测 (Backtest)", "🕵️ 市场扫描 (Scanner)", "🧪 参数优化 (Optimizer)"])
+    # 创建四个标签页
+    tab1, tab2, tab3, tab4= st.tabs(["📈 策略回测 (Backtest)", "🕵️ 市场扫描 (Scanner)", "🧪 参数优化 (Optimizer)", "📰 情报中心 (News)"])
 
     # ==========================
     # TAB 1: 策略回测 (升级版)
@@ -31,7 +32,7 @@ def render_dashboard():
         )
         
         st.sidebar.divider()
-        
+
         # 2. 根据选择显示不同的参数
         strategy = None # 初始化
         
@@ -136,38 +137,60 @@ def render_dashboard():
                 scan_results = scanner.scan_market(symbols, short_window, long_window)
                 
             if not scan_results.empty:
-                # --- 1. 数据分流 ---
-                # 找出需要行动的 (Buy/Sell) 和 不需要行动的 (Holding/Empty)
-                action_df = scan_results[scan_results['Status'].str.contains("BUY|SELL")]
-                passive_df = scan_results[~scan_results['Status'].str.contains("BUY|SELL")]
+                # --- 1. 数据分流 (逻辑升级) ---
+                # 只要满足以下任一条件，就列入“重点关注”：
+                # A. 状态是 BUY 或 SELL
+                # B. 形态不是横杠 "-" (说明识别出了 Hammer/Doji 等)
+                
+                is_signal = scan_results['Status'].str.contains("BUY|SELL")
+                is_pattern = scan_results['Pattern'] != "-"
+                
+                action_df = scan_results[is_signal | is_pattern]
+                passive_df = scan_results[~(is_signal | is_pattern)]
                 
                 # --- 2. 顶部统计卡片 ---
                 buy_count = len(scan_results[scan_results['Status'].str.contains("BUY")])
                 sell_count = len(scan_results[scan_results['Status'].str.contains("SELL")])
+                pattern_count = len(scan_results[scan_results['Pattern'] != "-"])
                 
-                c1, c2, c3 = st.columns(3)
+                c1, c2, c3, c4 = st.columns(4)
                 c1.metric("🔍 扫描数量", len(scan_results))
-                c2.metric("🔺 买入信号", buy_count, delta=buy_count if buy_count > 0 else None)
-                c3.metric("🔻 卖出信号", sell_count, delta=-sell_count if sell_count > 0 else None)
+                c2.metric("🔺 MA 买点", buy_count)
+                c3.metric("🔻 MA 卖点", sell_count)
+                c4.metric("🕯️ 形态发现", pattern_count, delta="关注" if pattern_count > 0 else None)
                 
                 st.divider()
 
                 # --- 3. 重点展示区 ---
                 if not action_df.empty:
-                    st.error("🚨 发现今日交易机会！")
+                    st.error("🚨 发现今日交易机会 (信号 或 形态)！")
+                    
+                    # 定义样式函数：同时高亮 Status 和 Pattern
+                    def highlight_row(row):
+                        styles = [''] * len(row)
+                        # 高亮 Status
+                        status_idx = row.index.get_loc('Status')
+                        if 'BUY' in str(row['Status']):
+                            styles[status_idx] = 'background-color: #90EE90; color: black' # 绿
+                        elif 'SELL' in str(row['Status']):
+                            styles[status_idx] = 'background-color: #FFB6C1; color: black' # 红
+                            
+                        # 高亮 Pattern (如果有内容)
+                        pat_idx = row.index.get_loc('Pattern')
+                        if row['Pattern'] != "-":
+                            styles[pat_idx] = 'background-color: #FFFACD; color: black; font-weight: bold' # 黄色高亮
+                            
+                        return styles
+
                     st.dataframe(
-                        action_df.style.map(
-                            lambda x: 'background-color: #ffcccc' if 'SELL' in str(x) else 'background-color: #ccffcc', 
-                            subset=['Status']
-                        ),
+                        action_df.style.apply(highlight_row, axis=1),
                         width="stretch"
                     )
                 else:
-                    st.success("🍵 今日无操作信号 (No Action Needed)")
+                    st.success("🍵 今日无任何信号 (No Action Needed)")
 
                 # --- 4. 详情列表 (折叠) ---
-                with st.expander(f"查看其余 {len(passive_df)} 只股票状态 (Holding/Empty)", expanded=True):
-                    # 对 Holding 和 Empty 做简单的颜色区分
+                with st.expander(f"查看其余 {len(passive_df)} 只沉闷的股票", expanded=False):
                     st.dataframe(
                         passive_df.style.map(
                             lambda x: 'color: green' if 'Holding' in str(x) else 'color: gray',
@@ -251,4 +274,44 @@ def render_dashboard():
                                  hover_data=['Return (%)', 'Win Rate'], # 鼠标放上去显示真实数据
                                  title="参数热力分布 (颜色越绿越赚)", 
                                  color_continuous_scale='RdYlGn')
-                st.plotly_chart(fig)            
+                st.plotly_chart(fig)  
+
+    # ==========================
+    # TAB 4: 情报中心 (Day 8 重制版)
+    # ==========================
+    with tab4:
+        st.subheader("📰 全球市场情报")
+        
+        col1, col2 = st.columns([1, 4])
+        with col1:
+            # 这里的输入框默认值可以是上面选过的 symbol，或者给个新默认值
+            news_symbol = st.text_input("输入代码", value="AAPL", key="news_search_input").upper()
+            search_btn = st.button("🔍 搜集情报", type="primary")
+            
+        st.divider()
+
+        if search_btn or news_symbol:
+            news_provider = NewsProvider()
+            with st.spinner(f"正在从全网搜集关于 {news_symbol} 的线索..."):
+                news_list = news_provider.get_company_news(news_symbol, limit=10)
+            
+            if news_list:
+                # 遍历新闻列表，显示漂亮的布局
+                for i, news in enumerate(news_list):
+                    # 使用 expander 或者 container 美化
+                    with st.container():
+                        # 标题做成蓝色超链接
+                        st.markdown(f"### [{news['title']}]({news['link']})")
+                        
+                        # 第一行：来源和时间 (用小字)
+                        st.caption(f"📢 {news['publisher']}  |  🕒 {news['date']}")
+                        
+                        # 正文摘要
+                        if news['summary']:
+                            st.info(news['summary'])
+                        
+                        # 如果不是最后一条，加个分割线
+                        if i < len(news_list) - 1:
+                            st.divider()
+            else:
+                st.warning("未搜索到相关新闻，可能是网络问题或代码输入有误。")                    
