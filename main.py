@@ -1,43 +1,49 @@
 # main.py
 from data.yfinance_provider import YFinanceProvider
 from core.strategies.ma_cross import MovingAverageCrossStrategy
+from core.backtester import Backtester  # <--- 新增导入
 
 def main():
-    print("🧠 Stock Intelligence System - Day 2 Strategy Test")
-    print("================================================")
+    print("💰 Stock Intelligence System - Day 3 Backtest")
+    print("===========================================")
     
-    # 1. 获取数据 (Day 1 的工作)
+    # 1. 获取数据 (取过去 5 年，看长期表现)
     symbol = "AAPL"
+    print(f"📥 [1/3] 获取 {symbol} 5年历史数据...")
     provider = YFinanceProvider()
-    df = provider.get_price_history(symbol, period="1y") # 取1年数据看趋势
+    df = provider.get_price_history(symbol, period="5y") 
     
-    if df.empty:
-        print("❌ 数据获取失败")
-        return
+    if df.empty: return
 
-    # 2. 运行策略 (Day 2 的工作)
-    print(f"\n⚙️ 正在运行双均线策略 (MA20 vs MA50)...")
-    strategy = MovingAverageCrossStrategy(short_window=20, long_window=50)
-    result_df = strategy.generate_signals(df)
+    # 2. 运行策略
+    print(f"⚙️ [2/3] 运行策略 (MA20 vs MA50)...")
+    strategy = MovingAverageCrossStrategy(short_window=50, long_window=200)
+    signals_df = strategy.generate_signals(df)
     
-    # 3. 找出所有买入/卖出信号
-    buy_signals = result_df[result_df['Position'] == 1]
-    sell_signals = result_df[result_df['Position'] == -1]
+    # 3. 运行回测 (新增部分)
+    print(f"💵 [3/3] 模拟交易 (初始资金 $10,000)...")
+    backtester = Backtester(initial_capital=10000)
+    results = backtester.run_backtest(signals_df)
     
-    # 4. 打印报告
-    print(f"\n📊 {symbol} 策略分析报告:")
-    print(f"-------------------------")
-    print(f"检测到买入机会: {len(buy_signals)} 次")
-    print(f"检测到卖出机会: {len(sell_signals)} 次")
+    metrics = results['metrics']
+    data = results['data']
+
+    # 4. 打印最终报告
+    print(f"\n📊 {symbol} 5年回测成绩单:")
+    print(f"-----------------------------")
+    print(f"最终资产: {metrics['Final Value']}")
+    print(f"总收益率: {metrics['Total Return']}")
+    print(f"最大回撤: {metrics['Max Drawdown']} (最惨时的跌幅)")
+    print(f"日胜率  : {metrics['Win Rate (Daily)']}")
     
-    print(f"\n最近 3 次交易信号:")
-    # 合并买卖信号并按时间排序
-    all_signals = result_df[result_df['Position'] != 0].tail(3)
-    
-    for date, row in all_signals.iterrows():
-        action = "🔺 买入 (GOLDEN CROSS)" if row['Position'] == 1 else "🔻 卖出 (DEATH CROSS)"
-        price = row['Close']
-        print(f"[{date.date()}] {action} @ ${price:.2f}")
+    # 对比一下：如果傻傻拿着不动 (Buy & Hold) 会赚多少？
+    buy_and_hold_return = (df['Close'].iloc[-1] / df['Close'].iloc[0]) - 1
+    print(f"\n基准对比 (买入持有): {buy_and_hold_return:.2%}")
+
+    if float(metrics['Total Return'].strip('%')) > buy_and_hold_return * 100:
+        print("✅ 策略跑赢了死拿！牛逼！")
+    else:
+        print("⚠️ 策略没跑赢死拿，需要优化。")
 
 if __name__ == "__main__":
     main()
