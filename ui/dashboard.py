@@ -3,6 +3,7 @@ import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import itertools
+import pandas as pd
 
 from data.yfinance_provider import YFinanceProvider
 from core.strategies.ma_cross import MovingAverageCrossStrategy
@@ -12,12 +13,14 @@ from core.optimizer import StrategyOptimizer # <--- 新增
 from core.strategies.rsi import RsiStrategy   # <--- 新增
 from core.strategies.macd import MacdStrategy # <--- 新增
 from data.news_provider import NewsProvider # <--- 新增
+from core.strategies.supertrend import SuperTrendStrategy # <--- 新增
+from core.portfolio import PortfolioBacktester # <--- 新增
 
 def render_dashboard():
     st.title("🎄 Stock Intelligence System")
 
-    # 创建四个标签页
-    tab1, tab2, tab3, tab4= st.tabs(["📈 策略回测 (Backtest)", "🕵️ 市场扫描 (Scanner)", "🧪 参数优化 (Optimizer)", "📰 情报中心 (News)"])
+    # 创建五个标签页
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📈 策略回测 (Backtest)", "🕵️ 市场扫描 (Scanner)", "🧪 参数优化 (Optimizer)", "📰 情报中心 (News)", "💼 组合回测 (Portfolio Backtest)"])
 
     # ==========================
     # TAB 1: 策略回测 (升级版)
@@ -28,7 +31,7 @@ def render_dashboard():
         # 1. 选择策略
         strategy_type = st.sidebar.selectbox(
             "选择交易策略", 
-            ["双均线 (MA Cross)", "RSI (超买超卖)", "MACD (趋势跟踪)"]
+            ["双均线 (MA Cross)", "RSI (超买超卖)", "MACD (趋势跟踪)", "SuperTrend (超级趋势)"]
         )
         
         st.sidebar.divider()
@@ -58,6 +61,12 @@ def render_dashboard():
             macd_signal = st.sidebar.slider("信号线 (Signal)", 5, 50, 9)
             # 实例化策略
             strategy = MacdStrategy(macd_fast, macd_slow, macd_signal)
+        elif strategy_type == "SuperTrend (超级趋势)":
+            st.sidebar.subheader("SuperTrend 参数")
+            st_period = st.sidebar.slider("ATR 周期", 5, 30, 10)
+            st_factor = st.sidebar.slider("倍数 (Multiplier)", 1.0, 5.0, 3.0, step=0.1)
+            # 实例化
+            strategy = SuperTrendStrategy(st_period, st_factor)    
 
         # 3. 通用设置 (股票代码等)
         # 把之前的代码稍微挪个位置，放在主页面更清晰
@@ -105,6 +114,16 @@ def render_dashboard():
                     elif strategy_type == "RSI (超买超卖)":
                         # RSI 可以在下面画个小图，或者直接不管，只看买卖点。这里简单处理，只画买卖点。
                         pass 
+                    elif strategy_type == "SuperTrend (超级趋势)":
+                    # 根据方向变色：涨势用绿线，跌势用红线
+                    # 这里我们简单画一条线，Plotly 会自动连起来，或者我们可以分段画
+                    # 简单画法：直接画一条线，颜色固定，或者用 marker
+                        fig.add_trace(go.Scatter(
+                            x=data.index, 
+                            y=data['SuperTrend'], 
+                            line=dict(color='purple', width=2, dash='dash'), 
+                            name='SuperTrend Line'
+                        ), row=1, col=1)
                     
                     # 画买卖点 (所有策略通用)
                     buys = data[data['Position'] == 1]
@@ -314,4 +333,87 @@ def render_dashboard():
                         if i < len(news_list) - 1:
                             st.divider()
             else:
-                st.warning("未搜索到相关新闻，可能是网络问题或代码输入有误。")                    
+                st.warning("未搜索到相关新闻，可能是网络问题或代码输入有误。")
+    # ==========================
+    # TAB 5: 组合回测 (Day 10)
+    # ==========================
+    with tab5:
+        st.subheader("🧺 投资组合压力测试")
+        st.write("假设我们将资金 **平分** 给多只股票，并同时执行相同的策略，结果会如何？")
+        
+        # 1. 输入股票池
+        default_portfolio = "AAPL, MSFT, NVDA, TSLA, GOOGL, AMZN, META"
+        pf_symbols = st.text_area("投资组合 (逗号分隔)", value=default_portfolio, height=70)
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            pf_capital = st.number_input("总投入资金 ($)", value=100000, step=10000)
+        with col2:
+            pf_period = st.selectbox("回测周期", ["1y", "2y", "5y"], index=1, key="pf_period")
+        with col3:
+            # 选择策略 (为了简化，我们在组合回测里只提供一种最强的策略选择，或者复用 Tab 1 的逻辑)
+            # 这里演示用 SuperTrend，因为它是你最新的武器
+            pf_strategy_name = st.selectbox("统一应用策略", ["SuperTrend", "MACD", "MA Cross"])
+
+        # 策略参数区 (根据选择显示)
+        params = {}
+        strategy_cls = None
+        
+        if pf_strategy_name == "SuperTrend":
+            st.caption("参数: Period=10, Multiplier=3.0 (默认)")
+            strategy_cls = SuperTrendStrategy
+            params = {'period': 10, 'multiplier': 3.0}
+        elif pf_strategy_name == "MACD":
+            st.caption("参数: 12, 26, 9 (默认)")
+            strategy_cls = MacdStrategy
+            params = {'fast': 12, 'slow': 26, 'signal': 9}
+        elif pf_strategy_name == "MA Cross":
+            st.caption("参数: 50, 200 (默认)")
+            strategy_cls = MovingAverageCrossStrategy
+            params = {'short_window': 50, 'long_window': 200}
+
+        if st.button("🔥 运行组合压力测试", type="primary"):
+            symbols_list = [s.strip().upper() for s in pf_symbols.split(',') if s.strip()]
+            
+            pf_tester = PortfolioBacktester(initial_capital=pf_capital)
+            
+            with st.spinner(f"正在同时交易 {len(symbols_list)} 只股票..."):
+                results = pf_tester.run_portfolio_backtest(symbols_list, strategy_cls, params, pf_period)
+            
+            total_equity = results['total_equity']
+            if total_equity is not None:
+                # 1. 核心指标
+                start_val = pf_capital
+                end_val = total_equity.iloc[-1]
+                total_ret = (end_val - start_val) / start_val * 100
+                
+                m1, m2 = st.columns(2)
+                m1.metric("组合最终资产", f"${end_val:,.2f}")
+                m2.metric("组合总收益率", f"{total_ret:.2f}%", delta=f"${end_val-start_val:,.2f}")
+                
+                # 2. 绘制总资产曲线
+                st.markdown("### 📈 组合总资产曲线")
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=total_equity.index, y=total_equity, fill='tozeroy', line=dict(color='gold'), name='Total Portfolio'))
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # 3. 各股表现对比
+                st.markdown("### 🏆 各股贡献排行榜")
+                details = results['details']
+                rows = []
+                for sym, data in details.items():
+                    metrics = data['metrics']
+                    # 提取数值
+                    ret_val = float(metrics['Total Return'].strip('%'))
+                    rows.append({
+                        'Symbol': sym,
+                        'Return (%)': ret_val,
+                        'Final Value': metrics['Final Value'],
+                        'Win Rate': metrics['Win Rate (Daily)']
+                    })
+                
+                df_rank = pd.DataFrame(rows).sort_values(by='Return (%)', ascending=False)
+                st.dataframe(df_rank.style.background_gradient(subset=['Return (%)'], cmap='RdYlGn'), use_container_width=True)
+                
+            else:
+                st.error("回测失败，请检查股票代码或网络。")                                
