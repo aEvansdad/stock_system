@@ -15,12 +15,13 @@ from core.strategies.macd import MacdStrategy # <--- 新增
 from data.news_provider import NewsProvider # <--- 新增
 from core.strategies.supertrend import SuperTrendStrategy # <--- 新增
 from core.portfolio import PortfolioBacktester # <--- 新增
+from core.paper_account import PaperAccount # <--- 新增
 
 def render_dashboard():
     st.title("🎄 Stock Intelligence System")
 
-    # 创建五个标签页
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📈 策略回测 (Backtest)", "🕵️ 市场扫描 (Scanner)", "🧪 参数优化 (Optimizer)", "📰 情报中心 (News)", "💼 组合回测 (Portfolio Backtest)"])
+    # 创建六个标签页
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📈 策略回测 (Backtest)", "🕵️ 市场扫描 (Scanner)", "🧪 参数优化 (Optimizer)", "📰 情报中心 (News)", "💼 组合回测 (Portfolio Backtest)", "📊 模拟交易 (Paper Trading)"])
 
     # ==========================
     # TAB 1: 策略回测 (升级版)
@@ -475,4 +476,65 @@ def render_dashboard():
                 st.dataframe(df_rank.style.background_gradient(subset=['Return (%)'], cmap='RdYlGn'), use_container_width=True)
                 
             else:
-                st.error("回测失败，请检查股票代码或网络。")                                
+                st.error("回测失败，请检查股票代码或网络。")     
+
+    # ==========================
+    # TAB 6: 模拟交易账户 (Day 13)
+    # ==========================
+    with tab6:
+        st.subheader("💰 实盘模拟账户 (Paper Trading)")
+        
+        account = PaperAccount()
+        
+        # --- 1. 账户概览 ---
+        balance = account.get_balance()
+        positions = account.get_positions()
+        
+        # 计算总市值 (需要获取当前股价，这里简化处理，只显示成本价值，或者你可以调用 yfinance 获取现价)
+        # 为了不卡顿，我们暂时只显示 cash
+        
+        col1, col2, col3 = st.columns(3)
+        col1.metric("💵 可用现金 (Cash)", f"${balance:,.2f}")
+        col2.metric("📦 持仓股票数", len(positions))
+        # col3 可以放总盈亏 (需要实时价格，留作后续优化)
+        
+        st.divider()
+        
+        # --- 2. 下单面板 ---
+        with st.container(border=True):
+            st.markdown("### 🛒 下单交易")
+            c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 2, 2])
+            
+            trade_symbol = c1.text_input("代码", "AAPL").upper()
+            trade_action = c2.selectbox("方向", ["BUY", "SELL"])
+            trade_price = c3.number_input("价格 ($)", min_value=0.01, value=200.00)
+            trade_qty = c4.number_input("数量", min_value=1, value=10)
+            
+            if c5.button("🚀 下单", type="primary"):
+                success, msg = account.execute_trade(trade_symbol, trade_action, trade_price, trade_qty)
+                if success:
+                    st.success(msg)
+                    st.rerun() # 刷新页面更新余额
+                else:
+                    st.error(msg)
+
+        # --- 3. 持仓列表 ---
+        st.subheader("📊 当前持仓")
+        if positions:
+            pos_data = []
+            for sym, data in positions.items():
+                pos_data.append({
+                    "Symbol": sym,
+                    "Quantity": data['qty'],
+                    "Avg Cost": f"${data['avg_price']:.2f}",
+                    "Total Cost": f"${data['qty'] * data['avg_price']:.2f}"
+                })
+            st.dataframe(pd.DataFrame(pos_data), use_container_width=True)
+        else:
+            st.info("目前空仓 (Cash is King!)")
+            
+        # --- 4. 交易历史 ---
+        with st.expander("📜 交易流水 (History)"):
+            history = account.data.get('history', [])
+            if history:
+                st.dataframe(pd.DataFrame(history), use_container_width=True)                                       

@@ -1,0 +1,19 @@
+{
+    "cash": 66000.0,
+    "positions": {
+        "GOOGL": {
+            "qty": 100,
+            "avg_price": 340.0
+        }
+    },
+    "history": [
+        {
+            "time": "2026-01-08 15:24:33",
+            "symbol": "GOOGL",
+            "action": "BUY",
+            "price": 340.0,
+            "qty": 100,
+            "amount": 34000.0
+        }
+    ]
+}
