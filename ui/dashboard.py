@@ -141,84 +141,124 @@ def render_dashboard():
     # TAB 2: 市场扫描 (UI 优化版)
     # ==========================
     with tab2:
-        st.subheader("🕵️ 批量扫描")
+        st.subheader("🕵️ 全市场扫描器")
         
-        # 默认股票池
-        default_list = "AAPL, MSFT, NVDA, TSLA, GOOGL, AMZN, META, AMD, SPY, QQQ"
-        user_input = st.text_area("输入股票代码 (用逗号分隔)", value=default_list, height=70)
-        
-        if st.button("📡 开始扫描", type="primary"):
-            # 处理输入
-            symbols = [s.strip().upper() for s in user_input.split(',') if s.strip()]
+        # --- 修复：确保变量名是 scan_tickers ---
+        default_list = "AAPL, MSFT, GOOGL, AMZN, TSLA, META, NVDA, AMD, INTC, NFLX"
+        scan_tickers = st.text_area("输入扫描股票池 (逗号分隔)", value=default_list, height=70)
+        # -------------------------------------
+
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            # 按钮逻辑
+            start_scan = st.button("📡 开始全市场扫描", type="primary")
+
+        # 确保这里不需要缩进到 col1 里面，或者是接着写
+        if start_scan:
+            # --- 修复：先定义 symbols_list ---
+            # 把输入框里的字符串 (scan_tickers) 分割成列表
+            symbols_list = [s.strip().upper() for s in scan_tickers.split(',') if s.strip()]
+            # -------------------------------
             
+            # 1. 实例化扫描器
             scanner = MarketScanner()
-            with st.spinner(f"正在扫描 {len(symbols)} 只股票..."):
-                scan_results = scanner.scan_market(symbols, short_window, long_window)
+            
+            # 2. 实例化一个默认策略用于扫描 (例如：标准双均线 50/200)
+            # 你也可以换成 RsiStrategy() 或 SuperTrendStrategy()
+            scan_strategy = MovingAverageCrossStrategy(short_window=50, long_window=200)
+            
+            # 3. 传入策略对象和股票列表 (修复报错：现在需要两个参数)
+            with st.spinner(f"正在扫描 {len(symbols_list)} 只股票 (策略: MA 50/200)..."):
+                scan_results = scanner.scan_market(scan_strategy, symbols_list)
                 
             if not scan_results.empty:
-                # --- 1. 数据分流 (逻辑升级) ---
-                # 只要满足以下任一条件，就列入“重点关注”：
-                # A. 状态是 BUY 或 SELL
-                # B. 形态不是横杠 "-" (说明识别出了 Hammer/Doji 等)
+                # ==========================
+                # 🔍 过滤器逻辑 (Day 11)
+                # ==========================
+                # 注意：with 下面必须缩进！
+                with st.expander("🌪️ 结果过滤器 (Filter Results)", expanded=True):
+                    f_col1, f_col2, f_col3 = st.columns(3)
+                    
+                    with f_col1:
+                        all_sectors = ["All"] + list(scan_results['Sector'].unique())
+                        sel_sector = st.selectbox("行业 (Sector)", all_sectors)
+                    
+                    with f_col2:
+                        max_pe = st.slider("最大市盈率 (Max PE)", 0, 100, 50)
+                    
+                    with f_col3:
+                        min_cap = st.slider("最小市值 ($B)", 0, 500, 0)
+
+                # --- 执行过滤 ---
+                filtered_df = scan_results.copy()
                 
-                is_signal = scan_results['Status'].str.contains("BUY|SELL")
-                is_pattern = scan_results['Pattern'] != "-"
+                # 1. 行业
+                if sel_sector != "All":
+                    filtered_df = filtered_df[filtered_df['Sector'] == sel_sector]
                 
-                action_df = scan_results[is_signal | is_pattern]
-                passive_df = scan_results[~(is_signal | is_pattern)]
+                # 2. PE
+                filtered_df = filtered_df[(filtered_df['PE'] > 0) & (filtered_df['PE'] <= max_pe)]
                 
-                # --- 2. 顶部统计卡片 ---
-                buy_count = len(scan_results[scan_results['Status'].str.contains("BUY")])
-                sell_count = len(scan_results[scan_results['Status'].str.contains("SELL")])
-                pattern_count = len(scan_results[scan_results['Pattern'] != "-"])
+                # 3. 市值
+                filtered_df = filtered_df[filtered_df['Mkt Cap (B)'] >= min_cap]
+                
+                # 更新用于显示的数据
+                display_df = filtered_df
+                
+                st.caption(f"筛选后剩余: {len(display_df)} 只股票")
+                st.divider()
+
+                # ==========================
+                # 📊 结果展示逻辑 (必须缩进在 if not scan_results.empty 里面)
+                # ==========================
+                
+                # 1. 统计数据
+                buy_count = len(display_df[display_df['Status'].str.contains("BUY")])
+                sell_count = len(display_df[display_df['Status'].str.contains("SELL")])
+                pattern_count = len(display_df[display_df['Pattern'] != "-"])
                 
                 c1, c2, c3, c4 = st.columns(4)
-                c1.metric("🔍 扫描数量", len(scan_results))
-                c2.metric("🔺 MA 买点", buy_count)
-                c3.metric("🔻 MA 卖点", sell_count)
-                c4.metric("🕯️ 形态发现", pattern_count, delta="关注" if pattern_count > 0 else None)
+                c1.metric("🔍 筛选数量", len(display_df))
+                c2.metric("🔺 买点", buy_count)
+                c3.metric("🔻 卖点", sell_count)
+                c4.metric("🕯️ 形态", pattern_count)
                 
                 st.divider()
 
-                # --- 3. 重点展示区 ---
+                # 2. 重点关注列表 (Buy/Sell 或 有形态)
+                is_signal = display_df['Status'].str.contains("BUY|SELL")
+                is_pattern = display_df['Pattern'] != "-"
+                action_df = display_df[is_signal | is_pattern]
+                
                 if not action_df.empty:
-                    st.error("🚨 发现今日交易机会 (信号 或 形态)！")
+                    st.error("🚨 重点关注 (信号/形态)")
                     
-                    # 定义样式函数：同时高亮 Status 和 Pattern
                     def highlight_row(row):
                         styles = [''] * len(row)
-                        # 高亮 Status
-                        status_idx = row.index.get_loc('Status')
                         if 'BUY' in str(row['Status']):
-                            styles[status_idx] = 'background-color: #90EE90; color: black' # 绿
+                            status_idx = row.index.get_loc('Status')
+                            styles[status_idx] = 'background-color: #90EE90; color: black'
                         elif 'SELL' in str(row['Status']):
-                            styles[status_idx] = 'background-color: #FFB6C1; color: black' # 红
-                            
-                        # 高亮 Pattern (如果有内容)
-                        pat_idx = row.index.get_loc('Pattern')
+                            status_idx = row.index.get_loc('Status')
+                            styles[status_idx] = 'background-color: #FFB6C1; color: black'
+                        
                         if row['Pattern'] != "-":
-                            styles[pat_idx] = 'background-color: #FFFACD; color: black; font-weight: bold' # 黄色高亮
-                            
+                            pat_idx = row.index.get_loc('Pattern')
+                            styles[pat_idx] = 'background-color: #FFFACD; color: black; font-weight: bold'
                         return styles
 
-                    st.dataframe(
-                        action_df.style.apply(highlight_row, axis=1),
-                        width="stretch"
-                    )
+                    st.dataframe(action_df.style.apply(highlight_row, axis=1), use_container_width=True)
                 else:
-                    st.success("🍵 今日无任何信号 (No Action Needed)")
-
-                # --- 4. 详情列表 (折叠) ---
-                with st.expander(f"查看其余 {len(passive_df)} 只沉闷的股票", expanded=False):
-                    st.dataframe(
-                        passive_df.style.map(
-                            lambda x: 'color: green' if 'Holding' in str(x) else 'color: gray',
-                            subset=['Status']
-                        ),
-                        width="stretch"
-                    )
+                    st.info("筛选结果中无重点交易信号。")
+                
+                # 3. 其余列表
+                passive_df = display_df[~(is_signal | is_pattern)]
+                if not passive_df.empty:
+                    with st.expander(f"查看其余 {len(passive_df)} 只股票"):
+                        st.dataframe(passive_df)
+                        
             else:
-                st.warning("没有获取到数据。")
+                st.warning("未扫描到任何结果，请检查代码或网络。")
 
     # ==========================
     # TAB 3: 参数优化 (Day 6)

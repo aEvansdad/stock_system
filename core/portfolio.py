@@ -36,7 +36,7 @@ class PortfolioBacktester:
                 signals = strategy.generate_signals(df)
                 
                 # 3. 运行回测 (使用分配到的资金)
-                backtester = Backtester(initial_capital=capital_per_stock)
+                backtester = Backtester(initial_capital=int(capital_per_stock))
                 res = backtester.run_backtest(signals)
                 
                 # 4. 记录数据
