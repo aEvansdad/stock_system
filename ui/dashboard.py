@@ -355,25 +355,44 @@ def render_dashboard():
                 news_list = news_provider.get_company_news(news_symbol, limit=10)
             
             if news_list:
-                # 遍历新闻列表，显示漂亮的布局
+                # --- Day 12: 计算整体情绪平均分 ---
+                avg_score = sum(n['sentiment'] for n in news_list) / len(news_list)
+                if avg_score > 0.05:
+                    overall_mood = "🟢 市场情绪乐观 (Bullish)"
+                elif avg_score < -0.05:
+                    overall_mood = "🔴 市场情绪悲观 (Bearish)"
+                else:
+                    overall_mood = "⚪ 市场情绪中性 (Neutral)"
+                
+                st.info(f"🤖 AI 分析结论: {overall_mood} (综合得分: {avg_score:.2f})")
+                st.divider()
+                # --------------------------------
+
                 for i, news in enumerate(news_list):
-                    # 使用 expander 或者 container 美化
                     with st.container():
-                        # 标题做成蓝色超链接
-                        st.markdown(f"### [{news['title']}]({news['link']})")
+                        # 根据情绪给标题加颜色标记
+                        score = news.get('sentiment', 0)
+                        if score > 0.1:
+                            emoji = "🟢"
+                            color = "green"
+                        elif score < -0.1:
+                            emoji = "🔴"
+                            color = "red"
+                        else:
+                            emoji = "⚪"
+                            color = "gray"
+
+                        # 标题行：Emoji + 标题
+                        st.markdown(f"### [{emoji} {news['title']}]({news['link']})")
                         
-                        # 第一行：来源和时间 (用小字)
-                        st.caption(f"📢 {news['publisher']}  |  🕒 {news['date']}")
+                        # 详细信息行
+                        st.caption(f"Score: {score:.2f} | 📢 {news['publisher']} | 🕒 {news['date']}")
                         
-                        # 正文摘要
-                        if news['summary']:
-                            st.info(news['summary'])
-                        
-                        # 如果不是最后一条，加个分割线
                         if i < len(news_list) - 1:
                             st.divider()
             else:
                 st.warning("未搜索到相关新闻，可能是网络问题或代码输入有误。")
+
     # ==========================
     # TAB 5: 组合回测 (Day 10)
     # ==========================
